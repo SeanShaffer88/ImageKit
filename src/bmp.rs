@@ -49,6 +49,13 @@ pub fn decode_bmp(data: &[u8]) -> CResult<Image> {
     let top_down = height_raw < 0;
     let height = height_raw.unsigned_abs();
     let width_u = width as u32;
+    let rgba_bytes = (width_u as u64)
+        .checked_mul(height as u64)
+        .and_then(|n| n.checked_mul(4))
+        .ok_or_else(|| corrupt("BMP dimensions overflow"))?;
+    if rgba_bytes > crate::MAX_PIXEL_BYTES as u64 {
+        return Err(corrupt("BMP pixel budget exceeded"));
+    }
     let channels = match bpp {
         24 => 3usize,
         32 => 4usize,
@@ -191,6 +198,13 @@ pub fn decode_pnm(data: &[u8]) -> CResult<Image> {
     }
     let w: u32 = tokens[1].parse().map_err(|_| corrupt("pnm: bad width"))?;
     let h: u32 = tokens[2].parse().map_err(|_| corrupt("pnm: bad height"))?;
+    let rgba_bytes = (w as u64)
+        .checked_mul(h as u64)
+        .and_then(|n| n.checked_mul(4))
+        .ok_or_else(|| corrupt("PNM dimensions overflow"))?;
+    if rgba_bytes > crate::MAX_PIXEL_BYTES as u64 {
+        return Err(corrupt("PNM pixel budget exceeded"));
+    }
     let maxval: u32 = tokens[3].parse().map_err(|_| corrupt("pnm: bad maxval"))?;
     if maxval != 255 {
         return Err((

@@ -117,9 +117,16 @@ pub fn decode_png(data: &[u8]) -> CResult<Image> {
     let mut trns_alpha: Vec<u8> = Vec::new();
     let mut idat: Vec<u8> = Vec::new();
     let mut seen_ihdr = false;
+    let mut seen_iend = false;
     while let Some((kind, body)) = it.next_chunk()? {
+        if !seen_ihdr && &kind != b"IHDR" {
+            return Err(corrupt("IHDR must be first"));
+        }
         match &kind {
             b"IHDR" => {
+                if seen_ihdr {
+                    return Err(corrupt("duplicate IHDR"));
+                }
                 if body.len() != 13 {
                     return Err(corrupt("IHDR must be 13 bytes"));
                 }
@@ -143,11 +150,17 @@ pub fn decode_png(data: &[u8]) -> CResult<Image> {
                 trns_alpha = body.to_vec();
             }
             b"IDAT" => idat.extend_from_slice(body),
-            b"IEND" => break,
+            b"IEND" => {
+                if !body.is_empty() {
+                    return Err(corrupt("IEND must be empty"));
+                }
+                seen_iend = true;
+                break;
+            }
             _ => {}
         }
     }
-    if !seen_ihdr || width == 0 || height == 0 {
+    if !seen_ihdr || !seen_iend || width == 0 || height == 0 {
         return Err(corrupt("missing IHDR or zero dimensions"));
     }
     if interlace != 0 {
@@ -170,12 +183,22 @@ pub fn decode_png(data: &[u8]) -> CResult<Image> {
             format!("bit depth {bit_depth} not supported in v0.1 (8 and 16 are)"),
         ));
     }
+    let pixel_bytes = (width as u64)
+        .checked_mul(height as u64)
+        .and_then(|n| n.checked_mul(4))
+        .ok_or_else(|| corrupt("pixel size overflow"))?;
+    if pixel_bytes > MAX_PIXEL_BYTES as u64 {
+        return Err(corrupt("pixel allocation exceeds limit"));
+    }
     let bytes_per_sample = (bit_depth / 8) as usize;
     let bpp = channels * bytes_per_sample; // bytes per pixel in the filtered stream
     let row_bytes = width as usize * bpp;
     let expected = (row_bytes + 1) * height as usize;
-    let raw = unzlib(&idat, MAX_PIXEL_BYTES + height as usize)?;
-    if raw.len() < expected {
+    if expected > MAX_PIXEL_BYTES {
+        return Err(corrupt("filtered stream exceeds limit"));
+    }
+    let raw = unzlib(&idat, expected)?;
+    if raw.len() != expected {
         return Err(corrupt(format!(
             "image data too short: got {} bytes, expected {expected}",
             raw.len()

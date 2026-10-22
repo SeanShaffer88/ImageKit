@@ -118,11 +118,17 @@ fn inflate_block(
     out: &mut Vec<u8>,
     lit: &Huffman,
     dist: &Huffman,
+    limit: usize,
 ) -> CResult<()> {
     loop {
         let sym = lit.decode(br)?;
         match sym {
-            0..=255 => out.push(sym as u8),
+            0..=255 => {
+                if out.len() >= limit {
+                    return Err(corrupt("decompressed size exceeds the declared limit"));
+                }
+                out.push(sym as u8);
+            }
             256 => return Ok(()),
             257..=285 => {
                 let idx = (sym - 257) as usize;
@@ -139,6 +145,9 @@ fn inflate_block(
                 if d > out.len() {
                     return Err(corrupt("distance too far back"));
                 }
+                if len > limit.saturating_sub(out.len()) {
+                    return Err(corrupt("decompressed size exceeds the declared limit"));
+                }
                 let start = out.len() - d;
                 for i in 0..len {
                     let b = out[start + i];
@@ -151,6 +160,7 @@ fn inflate_block(
 }
 
 pub fn inflate(data: &[u8], expected_max: usize) -> CResult<Vec<u8>> {
+    let limit = expected_max.min(crate::MAX_PIXEL_BYTES);
     let mut br = BitReader::new(data);
     let mut out = Vec::new();
     loop {
@@ -175,6 +185,9 @@ pub fn inflate(data: &[u8], expected_max: usize) -> CResult<Vec<u8>> {
                 if br.pos + len > data.len() {
                     return Err(corrupt("stored block truncated"));
                 }
+                if len > limit.saturating_sub(out.len()) {
+                    return Err(corrupt("decompressed size exceeds the declared limit"));
+                }
                 out.extend_from_slice(&data[br.pos..br.pos + len]);
                 br.pos += len;
                 br.bit = 0;
@@ -186,7 +199,7 @@ pub fn inflate(data: &[u8], expected_max: usize) -> CResult<Vec<u8>> {
                 lit_lengths[256..280].fill(7);
                 let lit = Huffman::new(&lit_lengths)?;
                 let dist = Huffman::new(&[5u8; 30])?;
-                inflate_block(&mut br, &mut out, &lit, &dist)?;
+                inflate_block(&mut br, &mut out, &lit, &dist, limit)?;
             }
             2 => {
                 let hlit = br.bits(5)? as usize + 257;
@@ -246,7 +259,7 @@ pub fn inflate(data: &[u8], expected_max: usize) -> CResult<Vec<u8>> {
                 }
                 let lit = Huffman::new(&lengths[..hlit])?;
                 let dist = Huffman::new(&lengths[hlit..hlit + hdist])?;
-                inflate_block(&mut br, &mut out, &lit, &dist)?;
+                inflate_block(&mut br, &mut out, &lit, &dist, limit)?;
             }
             _ => return Err(corrupt("invalid block type")),
         }

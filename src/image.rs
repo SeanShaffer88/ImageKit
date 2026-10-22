@@ -19,6 +19,9 @@ impl Image {
         rgba: Vec<u8>,
         source_format: &'static str,
     ) -> CResult<Image> {
+        if width == 0 || height == 0 {
+            return Err((ERR_INVALID_ARG, "image dimensions must be nonzero".into()));
+        }
         let expected = (width as usize)
             .checked_mul(height as usize)
             .and_then(|n| n.checked_mul(4))
@@ -47,7 +50,16 @@ impl Image {
     }
 
     pub fn solid(width: u32, height: u32, px: [u8; 4]) -> CResult<Image> {
-        let n = (width as usize) * (height as usize);
+        if width == 0 || height == 0 {
+            return Err((ERR_INVALID_ARG, "image dimensions must be nonzero".into()));
+        }
+        let n = (width as usize)
+            .checked_mul(height as usize)
+            .filter(|n| *n <= MAX_PIXEL_BYTES / 4)
+            .ok_or((
+                ERR_INVALID_ARG,
+                "image dimensions exceed pixel budget".into(),
+            ))?;
         let mut rgba = vec![0u8; n * 4];
         for i in 0..n {
             rgba[i * 4..i * 4 + 4].copy_from_slice(&px);
