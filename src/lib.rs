@@ -75,6 +75,12 @@ pub fn sniff_format(data: &[u8]) -> Option<&'static str> {
 
 /// Decode PNG/BMP/PNM bytes into an RGBA8 image.
 pub fn decode(data: &[u8]) -> CResult<image::Image> {
+    if data.len() > MAX_PIXEL_BYTES {
+        return Err((
+            ERR_INVALID_ARG,
+            "encoded image exceeds 512 MiB input limit".into(),
+        ));
+    }
     match sniff_format(data) {
         Some("png") => png::decode_png(data),
         Some("bmp") => bmp::decode_bmp(data),

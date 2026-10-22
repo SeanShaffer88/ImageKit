@@ -201,7 +201,7 @@ pub extern "C" fn ik_load_file(path: *const c_char) -> u64 {
 #[no_mangle]
 pub extern "C" fn ik_load_bytes(data: *const u8, len: usize) -> u64 {
     finish_handle(guard(|| {
-        if data.is_null() || len == 0 {
+        if data.is_null() || len == 0 || len > crate::MAX_PIXEL_BYTES {
             return Err((ERR_INVALID_ARG, "data must not be null/empty".into()));
         }
         let bytes = unsafe { std::slice::from_raw_parts(data, len) };
